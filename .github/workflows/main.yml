@@ -1,0 +1,22 @@
+name: System Monitor CI
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  run-ansible:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Install Ansible
+        run: |
+          sudo apt update
+          sudo apt install -y ansible
+
+      - name: Run system monitor playbook
+        run: ansible-playbook -i hosts system_monitor.yml
