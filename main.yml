@@ -1,0 +1,53 @@
+---
+- name: System Monitoring – Main Playbook
+  hosts: local
+  gather_facts: yes
+
+  vars:
+    cpu_threshold: 80
+    ram_threshold: 80
+    disk_threshold: 80
+
+  tasks:
+
+    - name: Create reports directory
+      file:
+        path: reports
+        state: directory
+
+    - name: Get CPU usage
+      shell: "top -bn1 | grep 'Cpu(s)' | awk '{print $2 + $4}'"
+      register: cpu_raw
+
+    - name: Convert CPU usage
+      set_fact:
+        cpu_usage: "{{ cpu_raw.stdout | float | round(0) | int }}"
+
+    - name: Calculate RAM usage
+      set_fact:
+        ram_usage: "{{ ((ansible_facts.memtotal_mb - ansible_facts.memfree_mb) / ansible_facts.memtotal_mb * 100) | float | round(0) | int }}"
+
+    - name: Get Disk usage
+      shell: "df -h / | awk 'NR==2 {print $5}' | sed 's/%//'"
+      register: disk_raw
+
+    - name: Convert disk usage
+      set_fact:
+        disk_usage: "{{ disk_raw.stdout | int }}"
+
+    - name: Generate TXT report from template
+      template:
+        src: templates/report.txt.j2
+        dest: "reports/report_{{ ansible_date_time.time }}.txt"
+
+    - name: Generate HTML report from template
+      template:
+        src: templates/report.html.j2
+        dest: "reports/system_report.html"
+
+    - name: Debug summary
+      debug:
+        msg: |
+          Reports generated:
+          - Text report
+          - HTML report
