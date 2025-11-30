@@ -1,0 +1,14 @@
+# ---------------------------
+# JSON METRICS
+# ---------------------------
+- name: Save metrics to JSON
+  copy:
+    dest: "reports/metrics.json"
+    content: |
+      {
+        "cpu_usage": {{ cpu_usage | int }},
+        "ram_usage_percent": {{ ram_usage_percent | int }},
+        "disk_usage": {{ disk_usage | int }},
+        "ssh_running": "{{ 'YES' if ssh_status.stdout != '' else 'NO' }}",
+        "cron_running": "{{ 'YES' if cron_status.stdout != '' else 'NO' }}"
+      }
