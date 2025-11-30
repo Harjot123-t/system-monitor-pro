@@ -1,202 +1,208 @@
 ---
-- name: Ultra Final Professional Dashboard
+- name: Professional System Monitoring Suite
   hosts: localhost
   gather_facts: yes
 
+  vars:
+    cpu_threshold: 80
+    ram_threshold: 80
+    disk_threshold: 80
+
+    telegram_bot_token: "YOUR_BOT_TOKEN"
+    telegram_chat_id: "YOUR_CHAT_ID"
+
+    txt_report_file: "reports/system_report.txt"
+    html_report_file: "reports/system_report.html"
+    metrics_file: "reports/metrics.json"
+    dashboard_file: "reports/dashboard_advanced.html"
+
   tasks:
 
-    - name: Ensure reports folder exists
+    # ---------------------------
+    # CREATE REPORTS DIRECTORY
+    # ---------------------------
+    - name: Ensure reports directory exists
       file:
         path: reports
         state: directory
+        mode: '0755'
 
-    # CPU
+    # ---------------------------
+    # CPU USAGE
+    # ---------------------------
     - name: Get CPU usage
-      shell: "top -bn1 | grep 'Cpu(s)' | awk '{print 100 - $8}'"
+      shell: "top -bn1 | grep 'Cpu(s)' | awk '{print $2 + $4}'"
       register: cpu_usage_raw
 
-    - set_fact:
+    - name: Convert CPU usage
+      set_fact:
         cpu_usage: "{{ cpu_usage_raw.stdout | float | round(0) | int }}"
 
-    # RAM
-    - set_fact:
-        ram_usage: "{{ ((ansible_facts.memtotal_mb - ansible_facts.memfree_mb) * 100 / ansible_facts.memtotal_mb) | float | round(0) | int }}"
+    # ---------------------------
+    # RAM USAGE
+    # ---------------------------
+    - name: Calculate RAM usage
+      set_fact:
+        ram_usage_percent: "{{ ((ansible_facts.memtotal_mb - ansible_facts.memfree_mb) / ansible_facts.memtotal_mb * 100) | float | round(0) | int }}"
 
-    # DISK
+    # ---------------------------
+    # DISK USAGE
+    # ---------------------------
     - name: Get disk usage
-      shell: "df -h / | awk 'NR==2 {print $5}' | sed 's/%//' "
+      shell: "df -h / | awk 'NR==2 {print $5}' | sed 's/%//'"
       register: disk_usage_raw
 
-    - set_fact:
+    - name: Convert disk usage
+      set_fact:
         disk_usage: "{{ disk_usage_raw.stdout | int }}"
 
-    # TOP PROCESSES
-    - name: Get top 5 CPU processes
-      shell: "ps -eo pid,cmd,%cpu --sort=-%cpu | head -6"
-      register: top_cpu
+    # ---------------------------
+    # SERVICES (WSL SAFE)
+    # ---------------------------
+    - name: Check SSH running
+      shell: "pgrep ssh || true"
+      register: ssh_status
 
-    - name: Get top 5 RAM processes
-      shell: "ps -eo pid,cmd,%mem --sort=-%mem | head -6"
-      register: top_ram
+    - name: Check cron running
+      shell: "pgrep cron || pgrep crond || true"
+      register: cron_status
 
-    # SYSTEM INFO
-    - set_fact:
-        hostname: "{{ ansible_facts.hostname }}"
-        os: "{{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}"
-        kernel: "{{ ansible_facts.kernel }}"
-        cpu_model: "{{ ansible_facts.processor[2] }}"
-        cpu_cores: "{{ ansible_facts.processor_vcpus }}"
-        total_ram: "{{ ansible_facts.memtotal_mb | int }}"
-
-    # FINAL DASHBOARD
-    - name: Create next-level dashboard
+    # ---------------------------
+    # SAVE METRICS TO JSON
+    # ---------------------------
+    - name: Save metrics to JSON
       copy:
-        dest: reports/dashboard_advanced.html
+        dest: "{{ metrics_file }}"
+        content: |
+          {
+            "cpu_usage": {{ cpu_usage }},
+            "ram_usage_percent": {{ ram_usage_percent }},
+            "disk_usage": {{ disk_usage }},
+            "ssh_running": "{{ 'YES' if ssh_status.stdout != '' else 'NO' }}",
+            "cron_running": "{{ 'YES' if cron_status.stdout != '' else 'NO' }}"
+          }
+
+    # ---------------------------
+    # TXT REPORT
+    # ---------------------------
+    - name: Create system report (TXT)
+      copy:
+        dest: "{{ txt_report_file }}"
+        content: |
+          ===== SYSTEM REPORT =====
+
+          CPU:  {{ cpu_usage }}%
+          RAM:  {{ ram_usage_percent }}%
+          DISK: {{ disk_usage }}%
+
+          SSH running: {{ 'YES' if ssh_status.stdout != '' else 'NO' }}
+          Cron running: {{ 'YES' if cron_status.stdout != '' else 'NO' }}
+
+          ==========================
+
+    # ---------------------------
+    # HTML REPORT
+    # ---------------------------
+    - name: Create HTML report
+      copy:
+        dest: "{{ html_report_file }}"
+        content: |
+          <html>
+          <head>
+            <title>System Monitoring</title>
+          </head>
+          <body>
+            <h1>System Monitoring Dashboard</h1>
+
+            <h2>CPU: {{ cpu_usage }}%</h2>
+            <h2>RAM: {{ ram_usage_percent }}%</h2>
+            <h2>Disk: {{ disk_usage }}%</h2>
+
+            <h3>SSH Running: {{ 'YES' if ssh_status.stdout != '' else 'NO' }}</h3>
+            <h3>Cron Running: {{ 'YES' if cron_status.stdout != '' else 'NO' }}</h3>
+          </body>
+          </html>
+
+    # ---------------------------
+    # TELEGRAM ALERT
+    # ---------------------------
+    - name: Telegram alert if thresholds exceeded
+      uri:
+        url: "https://api.telegram.org/bot{{ telegram_bot_token }}/sendMessage"
+        method: POST
+        body_format: json
+        body:
+          chat_id: "{{ telegram_chat_id }}"
+          text: |
+            🚨 SYSTEM ALERT 🚨
+            CPU:  {{ cpu_usage }}%
+            RAM:  {{ ram_usage_percent }}%
+            DISK: {{ disk_usage }}%
+        status_code: 200
+      when:
+        - cpu_usage > cpu_threshold
+        - ram_usage_percent > ram_threshold
+        - disk_usage > disk_threshold
+
+    # ---------------------------
+    # ADVANCED DASHBOARD
+    # ---------------------------
+    - name: Generate fancy HTML dashboard
+      copy:
+        dest: "{{ dashboard_file }}"
         content: |
           <!DOCTYPE html>
           <html>
           <head>
-            <title>Next-Level Monitoring Dashboard</title>
+            <title>System Monitoring Dashboard</title>
             <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
             <style>
-              body {
-                background: #0d1117;
-                color: white;
-                font-family: Arial;
-                margin: 0;
-                padding: 20px;
-              }
-
-              .title {
-                text-align: center;
-                font-size: 55px;
-                color: #4ea1ff;
-                margin-bottom: 20px;
-              }
-
-              .grid {
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 20px;
-              }
-
-              .card {
-                background: linear-gradient(135deg, #161b22, #1f2937);
-                padding: 20px;
-                border-radius: 15px;
-                box-shadow: 0px 0px 12px black;
-                transition: transform 0.2s;
-              }
-
-              .card:hover {
-                transform: scale(1.05);
-              }
-
-              table {
-                width: 100%;
-                margin-top: 10px;
-              }
-
-              table, th, td {
-                border: 1px solid #30363d;
-                border-collapse: collapse;
-              }
-
-              th, td {
-                padding: 8px;
-              }
-
-              .info {
-                margin: 30px 0;
-                padding: 20px;
-                border-radius: 15px;
-                background: #161b22;
-              }
-
-              .auto-refresh {
-                text-align: center;
-                margin-top: 15px;
-                color: #91ff91;
-                font-size: 18px;
-              }
+              body { font-family: Arial; background:#f4f4f9; margin:20px; }
+              .card { background:white; padding:20px; border-radius:12px; margin-bottom:20px; box-shadow:0 0 10px rgba(0,0,0,0.1);}
+              h1, h2 { text-align:center; }
+              pre { background:#eee; padding:10px; border-radius:8px; }
             </style>
           </head>
-
           <body>
+            <h1>📊 Advanced System Monitoring Dashboard</h1>
 
-            <h1 class="title">🚀 Ultimate System Monitoring Dashboard</h1>
-
-            <div class="auto-refresh">Auto Refresh Every 5 Seconds</div>
-
-            <div class="grid">
-              <div class="card">
-                <h2>CPU Usage</h2>
-                <canvas id="cpuGauge"></canvas>
-              </div>
-
-              <div class="card">
-                <h2>RAM Usage</h2>
-                <canvas id="ramGauge"></canvas>
-              </div>
-
-              <div class="card">
-                <h2>Disk Usage</h2>
-                <canvas id="diskGauge"></canvas>
-              </div>
+            <div class="card">
+              <h2>CPU / RAM / Disk Usage</h2>
+              <canvas id="systemChart"></canvas>
             </div>
 
-            <div class="info">
-              <h2>System Information</h2>
-              <p><b>Hostname:</b> {{ hostname }}</p>
-              <p><b>OS:</b> {{ os }}</p>
-              <p><b>Kernel:</b> {{ kernel }}</p>
-              <p><b>CPU Model:</b> {{ cpu_model }}</p>
-              <p><b>CPU Cores:</b> {{ cpu_cores }}</p>
-              <p><b>Total RAM:</b> {{ total_ram }} MB</p>
-            </div>
-
-            <div class="grid">
-              <div class="card">
-                <h2>Top CPU Processes</h2>
-                <pre>{{ top_cpu.stdout }}</pre>
-              </div>
-
-              <div class="card">
-                <h2>Top RAM Processes</h2>
-                <pre>{{ top_ram.stdout }}</pre>
-              </div>
-
-              <div class="card">
-                <h2>Status Summary</h2>
-                <p>CPU: {{ cpu_usage }}%</p>
-                <p>RAM: {{ ram_usage }}%</p>
-                <p>Disk: {{ disk_usage }}%</p>
-              </div>
+            <div class="card">
+              <h2>Services</h2>
+              <p><b>SSH:</b> {{ 'YES' if ssh_status.stdout != '' else 'NO' }}</p>
+              <p><b>Cron:</b> {{ 'YES' if cron_status.stdout != '' else 'NO' }}</p>
             </div>
 
             <script>
-              function gauge(id, value, color) {
-                new Chart(document.getElementById(id), {
-                  type: "doughnut",
-                  data: {
-                    labels: ["Used", "Free"],
-                    datasets: [{
-                      data: [value, 100-value],
-                      backgroundColor: [color, "#30363d"],
-                      borderWidth: 0
-                    }]
-                  },
-                  options: { cutout: "70%" }
-                });
-              }
-
-              gauge("cpuGauge", {{ cpu_usage }}, "#2ecc71");
-              gauge("ramGauge", {{ ram_usage }}, "#f1c40f");
-              gauge("diskGauge", {{ disk_usage }}, "#e74c3c");
-
-              setTimeout(() => location.reload(), 5000);
+              const ctx = document.getElementById('systemChart').getContext('2d');
+              new Chart(ctx, {
+                type: 'bar',
+                data: {
+                  labels: ['CPU (%)', 'RAM (%)', 'Disk (%)'],
+                  datasets: [{
+                    label: 'Usage',
+                    data: [
+                      {{ cpu_usage }},
+                      {{ ram_usage_percent }},
+                      {{ disk_usage }}
+                    ],
+                    backgroundColor: ['rgba(255,99,132,0.6)', 'rgba(54,162,235,0.6)', 'rgba(255,206,86,0.6)'],
+                    borderColor: ['rgba(255,99,132,1)', 'rgba(54,162,235,1)', 'rgba(255,206,86,1)'],
+                    borderWidth: 1
+                  }]
+                },
+                options: {
+                  scales: { y: { beginAtZero:true, max:100 } }
+                }
+              });
             </script>
-
           </body>
           </html>
+
+    - name: Print dashboard path
+      debug:
+        msg: "Fancy dashboard generated → {{ dashboard_file }}"

@@ -1,0 +1,7 @@
+===== SYSTEM REPORT =====
+CPU: 2%
+RAM: 7%
+DISK: 1%
+SSH running: NO
+Cron running: NO
+==========================
