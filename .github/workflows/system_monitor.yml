@@ -1,0 +1,31 @@
+name: System Monitor
+
+# Trigger the workflow manually or every hour
+on:
+  schedule:
+    - cron: '0 * * * *'  # every hour
+  workflow_dispatch:
+
+jobs:
+  run_monitor:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python & Ansible
+        run: |
+          sudo apt update
+          sudo apt install ansible -y
+
+      - name: Run System Monitor Playbook
+        run: ansible-playbook -i hosts system_monitor.yml
+
+      - name: Commit & Push Dashboard
+        run: |
+          git config --global user.name "Harjot123-t"
+          git config --global user.email "hk1636569@gmail.com"
+          git add reports/
+          git commit -m "Update metrics and dashboard"
+          git push
